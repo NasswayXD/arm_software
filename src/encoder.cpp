@@ -1,57 +1,94 @@
-
 #include "encoder.h"
-#include <Wire.h>
 
-long     turn_count = 0;
-uint16_t last_raw   = 0;
-
-const uint8_t AS5600_ADDR     = 0x36;
-const uint8_t REG_RAW_ANGLE_H = 0x0C;
-const uint8_t REG_RAW_ANGLE_L = 0x0D;
-const uint8_t REG_STATUS      = 0x0B;
-
-
-bool i2cReadReg(uint8_t addr, uint8_t reg, uint8_t &val, int retries=3) { // read the i2c signals 
+// --------- low-level I2C helpers ---------
+static bool i2cReadReg(TwoWire& w, uint8_t addr, uint8_t reg, uint8_t& val, int retries = 3) {
   while (retries--) {
-    Wire.beginTransmission(addr);
-    Wire.write(reg);
-    if (Wire.endTransmission(false) == 0) {
-      if (Wire.requestFrom((int)addr, 1) == 1) {
-        val = Wire.read();
-        return true;
-      }
+    w.beginTransmission((uint8_t)addr);
+    w.write((uint8_t)reg);
+
+    // Use STOP after the pointer write (true). Avoids the "non-stop" path.
+    uint8_t err = w.endTransmission(true);
+    if (err == 0) {
+      // Exact overload: (uint16_t address, uint8_t quantity, bool stop)
+      uint8_t got = w.requestFrom((uint16_t)addr, (uint8_t)1, (bool)true);
+      if (got == 1) { val = w.read(); return true; }
     }
+
+    // Tiny breather to avoid hammering the bus if the device NACKed
     delay(2);
   }
   return false;
 }
 
-bool readRawAngle12(uint16_t &raw) { //reads the raw angles 
-  uint8_t hi, lo;
-  if (!i2cReadReg(AS5600_ADDR, REG_RAW_ANGLE_H, hi)) return false;
-  if (!i2cReadReg(AS5600_ADDR, REG_RAW_ANGLE_L, lo)) return false;
-  raw = ((((uint16_t)hi) << 8) | lo) & 0x0FFF;
+static bool readRawAngle12(AS5600Enc& e, uint16_t& raw) {
+  uint8_t hi = 0, lo = 0;
+  if (!i2cReadReg(*e.wire, e.addr, 0x0C, hi)) return false; // ANGLE (11:8)
+  if (!i2cReadReg(*e.wire, e.addr, 0x0D, lo)) return false; // ANGLE (7:0)
+  raw = (uint16_t)(((uint16_t)hi << 8) | lo) & 0x0FFF;
+  return true;
+}
+// --------- lifecycle ---------
+void enc_begin(AS5600Enc& e, TwoWire& w, int sda, int scl,
+               uint32_t clock_hz, uint8_t addr, float gear, bool do_begin) {
+  e.wire     = &w;
+  e.addr     = addr;
+  e.gear     = gear;
+  e.turns    = 0;
+  e.last_raw = 0;
+  e.seeded   = false;
+  e.r1 = e.r2 = e.r3 = 0;
+
+  if (do_begin) {
+    // Assert MASTER mode and clock in one call; do not call setClock() separately.
+    w.begin(sda, scl, clock_hz);
+  }
+}
+
+bool enc_seed(AS5600Enc& e) {
+  uint16_t r;
+  if (!readRawAngle12(e, r)) return false;
+  e.last_raw = r;
+  e.r1 = e.r2 = e.r3 = r;
+  e.turns = 0;
+  e.seeded = true;
   return true;
 }
 
+bool enc_read(AS5600Enc& e) {
+  uint16_t r;
+  if (!readRawAngle12(e, r)) return false;
 
-inline float rawToDeg(uint16_t raw) { return (raw * (360.0f / 4096.0f)); } //converst raw to the degrees that we like 
+  // tiny median-of-3
+  e.r1 = e.r2; e.r2 = e.r3; e.r3 = r;
+  uint16_t a = e.r1, b = e.r2, c = e.r3;
+  if (a > b) { auto t = a; a = b; b = t; }
+  if (b > c) { auto t = b; b = c; c = t; }
+  if (a > b) { auto t = a; a = b; b = t; }
+  uint16_t rm = b;
 
-float motorDegrees(uint16_t raw) { //converst raw to the degrees that esp eats 
-  return turn_count * 360.0f + rawToDeg(raw);
+  if (!e.seeded) { e.last_raw = rm; e.seeded = true; return true; }
+
+  int d = (int)rm - (int)e.last_raw;
+
+  // reject absurd spikes
+  if (d > 3000 || d < -3000) return false;
+
+  // wrap-aware turns
+  if (d > 2048)  { e.turns--; d -= 4096; }
+  if (d < -2048) { e.turns++; d += 4096; }
+
+  // still absurd? ignore
+  if (d > 2048 || d < -2048) return false;
+
+  e.last_raw = rm;
+  return true;
 }
 
-float outputDegrees(uint16_t raw) { //adjust for gear reduction (theoretical gear reduction is 25, but due to torque it is like that, at least it seams like that )
-  return motorDegrees(raw) / 38.5f;  // gear scaling
+// --------- math ---------
+float enc_motor_deg(const AS5600Enc& e) {
+  return e.turns * 360.0f + rawToDeg(e.last_raw);
 }
 
-void updateTurnCounter(uint16_t raw_now) { // updates turns to have gear reduction consistent  
-  int d = (int)raw_now - (int)last_raw;
-  if (d > 2048) { 
-    turn_count--;
-  }    
-  if (d < -2048) {
-    turn_count++;
-  }    
-  last_raw = raw_now;
+float enc_output_deg(const AS5600Enc& e) {
+  return enc_motor_deg(e) / e.gear;
 }
