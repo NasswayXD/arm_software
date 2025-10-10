@@ -8,12 +8,10 @@
 #include "safety.h"
 Servo escOne, escTwo;
 
-// ------- two I2C controllers + two encoders -------
-AS5600Enc enc_link1;  // left / link 1 encoder (Wire)
-AS5600Enc enc_link2;  // right / link 2 encoder (Wire1)
-// --------------------------------------------------
 
-// Per-joint PID states (independent)
+AS5600Enc enc_link1;  
+AS5600Enc enc_link2;  
+
 PIDState pid1{0,0,0};
 PIDState pid2{0,0,0};
 
@@ -80,29 +78,24 @@ void setup() {
   Wire.setTimeOut(50);
   Wire1.setTimeOut(50);
 
-  // init encoders WITHOUT re-beginning (do_begin=false)
   enc_begin(enc_link1, Wire,  PIN_SDA_One, PIN_SCL_One, 100000, 0x36, 38.0f, false);
   enc_begin(enc_link2, Wire1, PIN_SDA_Two, PIN_SCL_Two, 100000, 0x36, -38.0f, false);
   pinMode(LIMIT_SWITCH_CALIBRATION_ONE, INPUT_PULLUP);
   pinMode(LIMIT_SWITCH_CALIBRATION_TWO, INPUT_PULLUP);
-  // Seed unwrap once (after bus is up)
   if (!enc_seed(enc_link1)) Serial.println("enc_link1 seed failed");
   if (!enc_seed(enc_link2)) Serial.println("enc_link2 seed failed");
 
-  // ESCs
   escOne.attach(PIN_esc_One);
   escOne.writeMicroseconds(1500);
   escTwo.attach(PIN_esc_Two);
   escTwo.writeMicroseconds(1500);
   delay(3000);
 
-  // Reset PID states
   PID_reset_state(pid1);
   PID_reset_state(pid2);
 }
 
 void loop() {
-  // ---- simple serial UI ----
 
  
   if (Serial.available()) {

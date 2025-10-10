@@ -12,13 +12,12 @@ float target_deg_link_1 = 0.0f;
 
 float target_deg_link_2 = 0.0f;
 
-float applyDeadband(float x, float db) { //range around setpoint pid ignores diviations (tolerance)
+float applyDeadband(float x, float db) { 
   if (fabsf(x) < db) return 0.0f;
   return (x > 0) ? (x - db) / (1.0f - db) : (x + db) / (1.0f - db);
 }
 
 #include "pid.h"
-// keep your Kp, Ki, Kd as-is
 
 float PID_step_position_state(float target_deg_in, float meas_deg_in, PIDState& s) {
   uint32_t now = micros();
