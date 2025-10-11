@@ -38,10 +38,6 @@ void writeBase(float target_angle_deg) {
  
   float delta = target_angle_deg - curr_base_angle;
 
-  // If you want the *shortest* path, uncomment:
-  // if (delta >  180.0f) delta -= 360.0f;
-  // if (delta <= -180.0f) delta += 360.0f;
-
  
   if (fabs(delta) < 0.01f) return;
 
@@ -67,7 +63,7 @@ void writeBase(float target_angle_deg) {
   curr_base_angle = wrap360(target_angle_deg);
 }
 static inline void escTwoWriteNorm(float x) {
-  x = constrain(x, -0.07, 0.07f); 
+  x = constrain(x, -0.08, 0.08f); 
   int us = (int)(1500.0f + 500.0f * x);
   escTwo.writeMicroseconds(us);
 
@@ -77,7 +73,7 @@ inline void calibration_link_one(float &curr_deg, float &target){
   Serial.println("EXECUTING CALIBRATION ONE");
   if (digitalRead(LIMIT_SWITCH_CALIBRATION_ONE) == LOW) {
     escOneWriteNorm(0.0f);
-    zero1  = curr_deg;       
+    zero1  = curr_deg-7.0f;       
     target = 90.0f;         
     
     calibration_executed_one = true;
@@ -91,7 +87,7 @@ inline void calibration_link_two(float &curr_deg, float &target){
   Serial.println("EXECUTING CALIBRATION TWO");
   if (digitalRead(LIMIT_SWITCH_CALIBRATION_TWO) == LOW) {
     escTwoWriteNorm(0.0f);
-    zero2  = curr_deg+30.0f;      
+    zero2  = curr_deg+45.0f;      
     target = 90.0f;
     calibration_executed_two = true;
    
@@ -146,8 +142,8 @@ void loop() {
     input.trim();
 
     if (input.equalsIgnoreCase("reset")) {
-      target_deg_link_1 = 0.0f;
-      target_deg_link_2 = 0.0f;
+      target_deg_link_1 = 90.0f;
+      target_deg_link_2 = 90.0f;
       target_deg_base = 0.0f;
       PID_reset_state(pid1);
       PID_reset_state(pid2);
@@ -207,21 +203,21 @@ void loop() {
 
   float meas1 = deg_now_link1 - zero1;
   float meas2 = deg_now_link2 - zero2;
-  /*
+  
   if (!calibration_executed_one) {
     calibration_link_one(deg_now_link1, target_deg_link_1);
       
     
     return;
   }
- if(meas1>80.0f && meas1 < 100.0f){ 
-    if(calibration_executed_one && !calibration_executed_two){
-      
-      escOneWriteNorm(0.0f);
+ if((meas1>80.0f && meas1 < 100.0f)&&(calibration_executed_one && !calibration_executed_two)){ 
+  
      
-      calibration_link_two(deg_now_link2, target_deg_link_2);
-      return;
-    }  
+    escOneWriteNorm(0.0f);
+      
+    calibration_link_two(deg_now_link2, target_deg_link_2);
+    return;
+    
     
     
    
@@ -234,22 +230,22 @@ void loop() {
     }
   }
 
-*/
+
   float u_norm_1 = PID_step_position_state(target_deg_link_1, meas1, pid1);
   float u_norm_2 = PID_step_position_state(target_deg_link_2, meas2, pid2);
-  if (true){ //change to calibration_executed_one
-  //  if (danger(target_deg_link_1, target_deg_link_2,meas1, meas2)){
-    //  escOneWriteNorm(0.0f);
-    //  escTwoWriteNorm(0.0f);
-   //   Serial.println("DANGER");
-   // }else{
+  if (calibration_executed_one){ //change to calibration_executed_one
+  if (danger(target_deg_link_1, target_deg_link_2)){
+     escOneWriteNorm(0.0f);
+      escTwoWriteNorm(0.0f);
+      Serial.println("DANGER");
+    }else{
       if(fabs(curr_base_angle - target_deg_base) > 0.1f) writeBase(target_deg_base);
       escOneWriteNorm(u_norm_1);
       escTwoWriteNorm(u_norm_2);
 
-   // }
   }
-/*
+  }
+
    if (calibration_executed_one&&calibration_executed_two && danger_on){
       if (danger(target_deg_link_1, target_deg_link_2)){
         escOneWriteNorm(0.0f);
@@ -257,7 +253,7 @@ void loop() {
         Serial.println("DANGER");
       }
    }
- */
+ 
 
   static uint32_t lastPrint = 0;
   if (millis() - lastPrint >= PRINT_EVERY_MS) {
