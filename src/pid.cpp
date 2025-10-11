@@ -11,7 +11,7 @@ uint32_t pid_last_us = 0;
 float target_deg_link_1 = 0.0f;
 
 float target_deg_link_2 = 0.0f;
-
+float target_deg_base = 0.0f;
 float applyDeadband(float x, float db) { 
   if (fabsf(x) < db) return 0.0f;
   return (x > 0) ? (x - db) / (1.0f - db) : (x + db) / (1.0f - db);
