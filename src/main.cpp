@@ -11,18 +11,61 @@ Servo escOne, escTwo;
 
 AS5600Enc enc_link1;  
 AS5600Enc enc_link2;  
-
-PIDState pid1{0,0,0};
-PIDState pid2{0,0,0};
+static uint32_t last_us_loop = 0;
+PIDState pid1{0,0};
+PIDState pid2{0,0};
 float curr_base_angle = 0.0f;
 bool danger_on = false;
 float zero1 = 0.0f, zero2 = 0.0f;
 #define LIMIT_SWITCH_CALIBRATION_ONE 15
 #define LIMIT_SWITCH_CALIBRATION_TWO 16
 static float STEPS_PER_REV = 800.0f; 
-float x=0, y=0, z=0;
+float x=0, y=0, z=0, angle = 0;
 bool calibration_executed_one = false;
 bool calibration_executed_two = false;
+float target_deg_link_1, target_deg_link_2, target_deg_base = 0.0f;
+struct TestCase {
+  float x, y, z, angle_deg;
+};
+
+static const TestCase kTests[4] = {
+  {0.10f, 0.10f, 0.10f,  90.0f},  // test1
+  {0.12f, 0.08f, 0.09f, 120.0f},  // test2
+  {0.08f, 0.12f, 0.06f,  45.0f},  // test3
+  {0.20f, 0.20f, 0.10f, 150.0f},  // test4
+};
+
+static void runTestCase(int idx) {
+  if (idx < 0 || idx >= 4) {
+    Serial.println("Invalid test index");
+    return;
+  }
+  const auto& t = kTests[idx];
+  Serial.print("[TEST] x="); Serial.print(t.x);
+  Serial.print(" y=");       Serial.print(t.y);
+  Serial.print(" z=");       Serial.print(t.z);
+  Serial.print(" angle=");   Serial.println(t.angle_deg);
+
+  if (!reachable(t.x, t.y, t.z)) {
+    Serial.println("Test target out of reach!");
+    return;
+  }
+
+  auto ang = angles(t.x, t.y, t.z, t.angle_deg);
+  float alpha1 = std::get<0>(ang);  
+  float alpha2 = std::get<1>(ang); 
+  float alpha3 = std::get<2>(ang); 
+
+  target_deg_base   = alpha1;
+  target_deg_link_1 = alpha2;
+  target_deg_link_2 = alpha3;
+  angle = t.angle_deg;          
+
+  Serial.print("Targets -> base: "); Serial.print(target_deg_base);
+  Serial.print("  link1: ");         Serial.print(target_deg_link_1);
+  Serial.print("  link2: ");         Serial.println(target_deg_link_2);
+}
+
 static inline void escOneWriteNorm(float x) {
   x = constrain(x, -0.07, 0.07f); 
   int us = (int)(1500.0f + 500.0f * x);
@@ -123,7 +166,8 @@ void setup() {
   digitalWrite(ENA_PIN, LOW);
   if (!enc_seed(enc_link1)) Serial.println("enc_link1 seed failed");
   if (!enc_seed(enc_link2)) Serial.println("enc_link2 seed failed");
-
+  wrist.attach(WRIST);   
+  wrist.write(90); 
   escOne.attach(PIN_esc_One);
   escOne.writeMicroseconds(1500);
   escTwo.attach(PIN_esc_Two);
@@ -135,7 +179,12 @@ void setup() {
 }
 
 void loop() {
-
+  uint32_t now = micros();
+  if (last_us_loop == 0) last_us_loop = now;
+  float dt = (float)((uint32_t)(now - last_us_loop)) * 1e-6f; 
+  if (dt <= 0.0f) dt = 1e-4f;          
+  if (dt > 0.05f) dt = 0.05f;          
+  last_us_loop = now;
  
   if (Serial.available()) {
     String input = Serial.readStringUntil('\n');
@@ -149,34 +198,49 @@ void loop() {
       PID_reset_state(pid2);
       return;
     }
-    if (input.equalsIgnoreCase("test")) {
-      auto ang = angles(0.1f, 0.1f, 0.1f);    
-      float alpha2 = std::get<1>(ang);  
-      float alpha3 = std::get<2>(ang);  
-      target_deg_link_1 = alpha2;
-      target_deg_link_2 = alpha3;
-     
+    if (input.startsWith("test")) {
+      
+      int idx = -1;
+      if (input.length() == 4) {
+        idx = 0; 
+      } else {
+  
+        String tail = input.substring(4);
+        tail.trim();
+        if (tail.length() == 1 && isDigit(tail[0])) {
+          idx = (tail[0] - '1'); 
+        }
+      }
+      if (idx >= 0 && idx < 4) {
+        runTestCase(idx);
+      } else {
+        Serial.println("Usage: test | test1 | test2 | test3 | test4");
+      }
       return;
     }
 
     int s1 = input.indexOf(' ');
     int s2 = input.indexOf(' ', s1 + 1);
+    int s3 = input.indexOf(' ', s2 + 1);
 
     if (s1 > 0 && s2 > s1) {
       x = input.substring(0, s1).toFloat();
       y = input.substring(s1 + 1, s2).toFloat();
-      z = input.substring(s2 + 1).toFloat();
+      z = input.substring(s2 + 1, s3).toFloat();
+      angle = input.substring(s3 + 1).toFloat();
 
       Serial.print("You entered: ");
       Serial.print(x); Serial.print(", ");
       Serial.print(y); Serial.print(", ");
-      Serial.println(z);
+      Serial.print(z); Serial.print(", ");
+      Serial.print("Angle: "); Serial.println(angle);
 
       if (reachable(x, y, z)) {
-        auto ang = angles(x, y, z);        
+        auto ang = angles(x, y, z, angle);        
         float alpha2 = std::get<1>(ang);  
         float alpha3 = std::get<2>(ang);  
         float alpha1 = std::get<0>(ang); 
+        
         target_deg_link_1 = alpha2;
         target_deg_link_2 = alpha3;  
         target_deg_base = alpha1;
@@ -231,19 +295,20 @@ void loop() {
   }
 
 
-  float u_norm_1 = PID_step_position_state(target_deg_link_1, meas1, pid1);
-  float u_norm_2 = PID_step_position_state(target_deg_link_2, meas2, pid2);
-  if (calibration_executed_one){ //change to calibration_executed_one
-  if (danger(target_deg_link_1, target_deg_link_2)){
-     escOneWriteNorm(0.0f);
-      escTwoWriteNorm(0.0f);
-      Serial.println("DANGER");
-    }else{
-      if(fabs(curr_base_angle - target_deg_base) > 0.1f) writeBase(target_deg_base);
-      escOneWriteNorm(u_norm_1);
-      escTwoWriteNorm(u_norm_2);
+  float u_norm_1 = PID_step_position_state(target_deg_link_1, meas1,dt, pid1);
+  float u_norm_2 = PID_step_position_state(target_deg_link_2, meas2,dt, pid2);
+  if (calibration_executed_one){ 
+    if (danger(target_deg_link_1, target_deg_link_2)){
+      escOneWriteNorm(0.0f);
+        escTwoWriteNorm(0.0f);
+        Serial.println("DANGER");
+      }else{
+        if(fabs(curr_base_angle - target_deg_base) > 0.1f) writeBase(target_deg_base);
+        set_wrist(angle);
+        escOneWriteNorm(u_norm_1);
+        escTwoWriteNorm(u_norm_2);
 
-  }
+    }
   }
 
    if (calibration_executed_one&&calibration_executed_two && danger_on){
