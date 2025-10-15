@@ -27,3 +27,19 @@ struct Vec3 {
     return (n > 1e-6f) ? *this / n : Vec3(0,0,0);
   }
 };
+
+
+void traj_start(const Vec3& p0, const Vec3& p1, float vmax, float amax);
+
+void traj_start_with_v(const Vec3& p0, const Vec3& p1, float vmax, float amax,float v0, float v_end);
+
+
+
+bool traj_step(float dt, Vec3& p_out);
+
+
+bool  traj_active();
+float traj_time();      
+float traj_total_time(); 
+float traj_progress();   
+void  traj_cancel();

@@ -27,4 +27,3 @@ float enc_motor_deg(const AS5600Enc& e);
 float enc_output_deg(const AS5600Enc& e);  
 
 static inline float angleErrDeg(float target, float meas) { return target - meas; }
-
