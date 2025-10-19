@@ -29,7 +29,7 @@ float PID_step_position_state(float target_deg_in, float meas_deg_in, float dt, 
 
   float u = Kp * e + Ki * s.i + Kd * dedt;
   u = constrainf(u, -0.6f, 0.6f);
-  return applyDeadband(u, 0.04f);
+  return applyDeadband(u, 0.03f);
 }
 
 void PID_reset_state(PIDState& s) {

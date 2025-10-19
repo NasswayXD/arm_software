@@ -19,8 +19,8 @@ PIDState pid1{0,0};
 PIDState pid2{0,0};
 static float wrist_cmd_deg = 90.0f;
 static float grip_cmd_pct  = 0.0f;
-static constexpr float VMAX = 0.1f;  
-static constexpr float AMAX = 0.03f;
+static constexpr float VMAX = 0.07f;  
+static constexpr float AMAX = 0.022f;
 static float base_err_deg = 0.0f;  
 float curr_base_angle = 0.0f;
 bool danger_on = false;
@@ -99,8 +99,8 @@ static bool  g_playing    = false;
 static float g_play_t     = 0.0f;    
 
 static constexpr float PLAN_DT          = 0.005f; 
-static constexpr int   MIN_START_SAMPLES= 30;   
-static constexpr int   LOW_WATER        = 30; 
+static constexpr int   MIN_START_SAMPLES= 60;   
+static constexpr int   LOW_WATER        = 60; 
 float target_deg_link_1, target_deg_link_2, target_deg_base = 0.0f;
 static inline float degToSteps(float deg){ return deg * (STEPS_PER_REV / 360.0f); }
 static const float BASE_MAX_STEPS_PER_SEC = 2000.0f;  
@@ -124,19 +124,33 @@ struct TestCase {
   float x, y, z, angle_deg, gripper_percentage;
 };
 
-static const TestCase kTests[4] = {
+static const TestCase kTests[5] = {
   
-  {0.20f, 0.2f, 0.0f, 35.0f, 90.0f}, 
-  {0.20f, 0.2f, 0.0f, 35.0f, 40.0f},  // test1
+  {0.20f, 0.22f, -0.1f, 25.0f, 90.0f}, 
+  {0.20f, 0.22f, -0.1f, 25.0f, 40.0f},  // test1
 
-  {0.1f, 0.22f, 0.2f, 30.0f, 35.0f}, 
-  {0.0f, 0.25f, 0.2f, 30.0f, 35.0f},
+  {0.1f, 0.22f, 0.2f, 25.0f, 35.0f}, 
+  {0.10f, 0.05f, 0.0f, 35.0f, 35.0f},
+  {0.10f, 0.05f, 0.0f, 35.0f, 90.0f},
 };
 
 //90 is closed
 // 0 is open 
+
+
+
+static inline void apply_wrist_grip(float aoa_deg, float grip_pct){
+  if (fabsf(aoa_deg - wrist_cmd_deg) > 0.1f) {
+    set_wrist(aoa_deg);
+    wrist_cmd_deg = aoa_deg;
+  }
+  if (fabsf(grip_pct - grip_cmd_pct) > 0.1f) {
+    gripper_control(grip_pct);
+    grip_cmd_pct = grip_pct;
+  }
+}
 static void runTestCase(int idx) {
-  if (idx < 0 || idx >= 4) { Serial.println("Invalid test index"); return; }
+  if (idx < 0 || idx >= 5) { Serial.println("Invalid test index"); return; }
   const auto& t = kTests[idx];
 
   Serial.print("[TEST] x="); 
@@ -159,28 +173,16 @@ static void runTestCase(int idx) {
     t.angle_deg,
     t.gripper_percentage,
     VMAX, AMAX,
-    0.04f
+    0.06f
   });
-  merge_and_thin_queue(q, 0.02f,4.0f, 5.0f);
+  merge_and_thin_queue(q, 0.04f,4.0f, 5.0f);
 
   if (!g_playing && q.size() == 1) {
     apply_wrist_grip(q.front().aoa, q.front().grip);
   }
 }
-
-
-static inline void apply_wrist_grip(float aoa_deg, float grip_pct){
-  if (fabsf(aoa_deg - wrist_cmd_deg) > 0.1f) {
-    set_wrist(aoa_deg);
-    wrist_cmd_deg = aoa_deg;
-  }
-  if (fabsf(grip_pct - grip_cmd_pct) > 0.1f) {
-    gripper_control(grip_pct);
-    grip_cmd_pct = grip_pct;
-  }
-}
 static inline void escOneWriteNorm(float x) {
-  x = constrain(x, -0.08f, 0.08f); 
+  x = constrain(x, -0.2f, 0.2f); 
   int us = (int)(1500.0f + 500.0f * x);
   escOne.writeMicroseconds(us);
 
@@ -234,7 +236,7 @@ void base_update_nonblocking(float target_angle_deg, float dt) { //basically we 
 }
 
 static inline void escTwoWriteNorm(float x) {
-  x = constrain(x, -0.08f, 0.08f); 
+  x = constrain(x, -0.2f, 0.2f); 
   int us = (int)(1500.0f + 500.0f * x);
   escTwo.writeMicroseconds(us);
 
@@ -405,7 +407,7 @@ void loop() {
     if (input.equalsIgnoreCase("testall")) {
       q.clear(); g_buf.clear(); g_playing=false; g_play_t=0.0f;
       for (int i=0; i<4; ++i) runTestCase(i);
-      merge_and_thin_queue(q, 0.02f, 4.0f, 5.0f);
+      merge_and_thin_queue(q, 0.04f, 4.0f, 5.0f);
       return;
     }
 
@@ -423,7 +425,7 @@ void loop() {
           idx = (tail[0] - '1'); 
         }
       }
-      if (idx >= 0 && idx < 4) {
+      if (idx >= 0 && idx < 5) {
         runTestCase(idx);
       } else {
         Serial.println("Usage: test | test1 | test2 | test3 | test4");
@@ -453,9 +455,9 @@ void loop() {
           angle,            
           gripper_angle,   
           VMAX, AMAX,
-          0.04f              
+          0.06f              
         });
-        merge_and_thin_queue(q,0.02f, 4.0f, 5.0f);  /////////////////////////////////////min distance was increased from 0.012
+        merge_and_thin_queue(q,0.04f, 4.0f, 5.0f);  /////////////////////////////////////min distance was increased from 0.012
         if (!g_playing && q.size() == 1) {
           apply_wrist_grip(q.front().aoa, q.front().grip);
         }
